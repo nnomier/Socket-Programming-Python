@@ -138,32 +138,36 @@ class HttpProxy():
         received_data = ''
 
         with socket(AF_INET, SOCK_STREAM) as s_from_proxy_to_server:
-            s_from_proxy_to_server.connect((host_name, host_port))
-            s_from_proxy_to_server.sendall(http_request_to_server)
-            received_data = self.receive_server_response(s_from_proxy_to_server)
+            try:
+                s_from_proxy_to_server.connect((host_name, host_port))
+                s_from_proxy_to_server.sendall(http_request_to_server)
+            except Exception as e:
+                print(f'Failed to connect to {(host_name, host_port)}: {e}')
+                return b'Failed to connect to server host \n\r'
+            else:
+                received_data = self.receive_server_response(s_from_proxy_to_server)
+                decoded_received_data = received_data.decode('UTF-8')
+                received_data_lines = decoded_received_data.split(NEW_LINE_SEPARATOR)
 
-            decoded_received_data = received_data.decode('UTF-8')
-            received_data_lines = decoded_received_data.split(NEW_LINE_SEPARATOR)
+                first_response_line = received_data_lines[0]
+                remaining_server_response = NEW_LINE_SEPARATOR.join(received_data_lines[1:])
+                content_lines = NEW_LINE_SEPARATOR + NEW_LINE_SEPARATOR.join(decoded_received_data.split(NEW_LINE_SEPARATOR + NEW_LINE_SEPARATOR)[1:])
+                status_code = first_response_line.split()[1]
 
-            first_response_line = received_data_lines[0]
-            remaining_server_response = NEW_LINE_SEPARATOR.join(received_data_lines[1:])
-            content_lines = NEW_LINE_SEPARATOR + NEW_LINE_SEPARATOR.join(decoded_received_data.split(NEW_LINE_SEPARATOR + NEW_LINE_SEPARATOR)[1:])
-            status_code = first_response_line.split()[1]
+                if status_code == '404':
+                    print(f"Status code is {status_code}, No Cache Writing")
+                    return self.to_bytes(received_data_lines[0] + NEW_LINE_SEPARATOR + CACHE_MISS_STR + content_lines + NEW_LINE_SEPARATOR)
+                elif status_code != '200':
+                    print(f"Status code is not 200 or 404, No Cache Writing")
+                    return self.to_bytes(INTERNAL_ERROR_RESPONSE + NEW_LINE_SEPARATOR + CACHE_MISS_STR + content_lines + NEW_LINE_SEPARATOR)
 
-            if status_code == '404':
-                print(f"Status code is {status_code}, No Cache Writing")
-                return self.to_bytes(received_data_lines[0] + NEW_LINE_SEPARATOR + CACHE_MISS_STR + content_lines + NEW_LINE_SEPARATOR)
-            elif status_code != '200':
-                print(f"Status code is not 200 or 404, No Cache Writing")
-                return self.to_bytes(INTERNAL_ERROR_RESPONSE + NEW_LINE_SEPARATOR + CACHE_MISS_STR + content_lines + NEW_LINE_SEPARATOR)
-
-            print(f"Status code 200, Now writing to file...")
-            content_of_file = received_data_lines[0] + NEW_LINE_SEPARATOR + \
-                CACHE_HIT_STR + content_lines + NEW_LINE_SEPARATOR
-            self.write_to_file(content_of_file, cache_entry_path)
-            s_from_proxy_to_server.close()
-        
-        return self.to_bytes(received_data_lines[0] + NEW_LINE_SEPARATOR + CACHE_MISS_STR + remaining_server_response + NEW_LINE_SEPARATOR)
+                print(f"Status code 200, Now writing to file...")
+                content_of_file = received_data_lines[0] + NEW_LINE_SEPARATOR + \
+                    CACHE_HIT_STR + content_lines + NEW_LINE_SEPARATOR
+                self.write_to_file(content_of_file, cache_entry_path)
+                s_from_proxy_to_server.close()
+            
+            return self.to_bytes(received_data_lines[0] + NEW_LINE_SEPARATOR + CACHE_MISS_STR + remaining_server_response + NEW_LINE_SEPARATOR)
 
     @staticmethod
     def to_bytes(text):
