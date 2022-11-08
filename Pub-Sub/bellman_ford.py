@@ -1,11 +1,22 @@
+"""
+Bellman Ford
+:Authors: Noha Nomier
+"""
 import math
 
 class BellmanFord:
-
+    """
+    Constructs a BellmanFord object that maintains a graph and runs 
+    bellman ford algorithm on it to tetect negative cycle
+    """
     def __init__(self):
-        self.graph = {}
+        self.graph = {} #graph would look like {c1: {c2:price, c3,price} , c2: {c1,price, c4,price}, ....}
 
     def add_edge(self, curr1, curr2, price):
+        """
+        adds two new edges to the graph : (curr1, curr2, -log(price))
+        and (curr2, curr1, log(price)) to the graph dictionary
+        """
         rate = -1 * math.log(price)
         if curr1 not in self.graph.keys():
             self.graph[curr1] = {curr2: rate}
@@ -18,21 +29,17 @@ class BellmanFord:
             self.graph[curr2][curr1] = -1 * rate
 
     def get_graph(self):
+        """returns a reference to the current graph object"""
         return self.graph
     
     def remove_edge(self, curr1, curr2):
+        """removes the two edges (curr1,curr2) and (curr2,curr1)"""
         if curr1 not in self.graph:
             print(f'Invalid removal, \'{curr1}\' doesn\'t exist in graph')
             return
         if curr2 not in self.graph:
             print(f'Invalid removal, \'{curr2}\' doesn\'t exist in graph')
             return
-
-        """
-        {curr1 : {curr2:price, curr2:price},
-         curr1 : {curr2:price} 
-        }
-        """
 
         del self.graph[curr1][curr2]
         del self.graph[curr2][curr1]
@@ -43,12 +50,16 @@ class BellmanFord:
             del self.graph[curr2]
   
 
-
     def get_nodes(self):
+        """returns list of nodes in the graph"""
         return list(self.graph.keys())
     
     def shortest_paths(self, start_vertex, tolerance=0):
-
+        """
+        Runs Bellman Ford shortest path algorithm on the graph starting at @start_vertex
+        to detect negative cycle, a tolerance value is added to solve floating number rounding
+        errors
+        """
         # Dictionary to store lowest sum of edge weights
         distances = {}
 
@@ -60,7 +71,6 @@ class BellmanFord:
         V = len(self.graph) #number of vertices in the graph
 
         predecessor = {start_vertex : None}
-        # print(self.graph.items())
         for _ in range(V - 1):
             for u, v_dict in self.graph.items():
                 for v, weight in v_dict.items():
@@ -70,8 +80,7 @@ class BellmanFord:
                         predecessor[v] = u
 
         negative_cycle = None
-        # i = 0
-        # do one more iteration to detect cycle
+
         for u, v_dict in self.graph.items():
             for v, weight in v_dict.items():
                 if distances[u] != float("Inf") and distances[u] + weight - tolerance < distances[v] and distances[u] + weight + tolerance < distances[v]:
