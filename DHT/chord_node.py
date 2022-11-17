@@ -4,12 +4,12 @@ import threading
 import socket
 import sys
 
-M = 3  # FIXME: Test environment, normally = hashlib.sha1().digest_size * 8
+M = 4  # FIXME: Test environment, normally = hashlib.sha1().digest_size * 8
 NODES = 2**M
 BUF_SZ = 4096  # socket recv arg
 BACKLOG = 100  # socket listen arg
 TEST_BASE = 43544  # for testing use port numbers on localhost at TEST_BASE+n
-
+NOT_FOUND_MSG = "KEY DOESN'T EXIST"
 
 class ModRange(object):
     """
@@ -180,10 +180,11 @@ class ChordNode():
                 self.finger[i].node = self.node
             self.predecessor = self.node
         else:
-            print(f"Initializing Finger Table with the help of {n_prime}")
+            print(f"Initializing Finger Table with the help of {n_prime}\n\n")
             self.init_finger_table(n_prime)
             self.update_others()
-            self.pr_finger_table()
+
+        self.pr_finger_table()
 
     def pr_finger_table(self):
         for i in range(1, M+1):
@@ -198,9 +199,13 @@ class ChordNode():
         for i in range(1, M):
             if self.finger[i+1].start in ModRange(n, self.finger[i].node, NODES):
                 self.finger[i+1].node = self.finger[i].node
-                print(f"elawalaneya {i+1}")
             else:
                 self.finger[i+1].node = self.call_rpc(n_prime, 'find_successor', self.finger[i+1].start)
+
+    def put_data(self,key,value):
+        successor_node = self.find_successor(key)
+        print(f"DATA SHOULD BE PUT IN {successor_node}")
+        self.call_rpc(successor_node, 'update_keys', key, value)
 
     def get_predecessor(self):
         return self.predecessor
@@ -212,7 +217,8 @@ class ChordNode():
         rpc = client.recv(BUF_SZ)
         method, arg1, arg2 = pickle.loads(rpc)
         result = self.dispatch_rpc(method, arg1, arg2)
-        client.sendall(pickle.dumps(result))
+        if result != None:
+            client.sendall(pickle.dumps(result))
         client.close()
         self.pr_finger_table()
 
@@ -233,8 +239,42 @@ class ChordNode():
         elif method == 'update_finger_table':
             self.update_finger_table(arg1, arg2)
             return "OK"
+        elif method == 'put_data':
+            self.put_data(arg1, arg2)
+        elif method == 'update_keys':
+            self.update_keys(arg1, arg2)
+        elif method == 'find_data':
+            return self.find_data(arg1, arg2)
+        elif method == 'get_value':
+            return self.get_value(arg1, arg2)
         else:
             print(f"Received invalid request {method} with args: {(arg1, arg2)}")
+
+    def find_data(self, hashed_id, key):
+        if hashed_id>NODES:
+            return NOT_FOUND_MSG
+        successor_node = self.find_successor(hashed_id)
+        return self.call_rpc(successor_node, "get_value", hashed_id, key)
+
+    def get_value(self, hashed_id, key):
+        if hashed_id not in self.keys:
+            return NOT_FOUND_MSG
+        
+        entries_for_hash = self.keys[hashed_id]
+
+        if key not in entries_for_hash:
+            return NOT_FOUND_MSG
+        
+        return entries_for_hash[key]
+        
+    def update_keys(self, key, value):
+        entries = {}
+        if key in self.keys.keys():
+           entries = self.keys[key]      
+        entries.update(value)
+        self.keys[key] = entries  
+        
+        print(f"KEYS FOR THIS NODE : {self.keys}")
 
     def find_predecessor(self, id):
         """
