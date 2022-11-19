@@ -1,5 +1,19 @@
+"""
+CPSC 5520, Seattle University
+This is an implementation of Chord Distributed Hashtable assignment in distributed systems
+Lab4: chord
+
+Run notes:
+If it's the first node: 
+Run python3 chord_node.py [node_id], 
+node_id is just an int such as 0,1,2.. and the equivalent 
+port will be calculated by adding the id to the base_port
+if it's another node:
+Run python3 chord_node.py [new_node_id] [existing_node_id] 
+
+:Authors: Noha Nomier
+"""
 import pickle
-import hashlib
 import threading
 import socket
 import sys
@@ -9,7 +23,21 @@ NODES = 2**M
 BUF_SZ = 4096  # socket recv arg
 BACKLOG = 100  # socket listen arg
 TEST_BASE = 43544  # for testing use port numbers on localhost at TEST_BASE+n
+
 NOT_FOUND_MSG = "KEY DOESN'T EXIST"
+
+"""RPC Methods To Avoid Typos"""
+FIND_SUCCESSOR = 'find_successor'
+FIND_PREDECESSOR = 'find_predecessor'
+CLOSEST_PRECEDING_FINGER = 'closest_preceding_finger'
+GET_PREDECESSOR = 'get_predecessor'
+SET_PREDECESSOR = 'set_predecessor'
+SUCCESSOR = 'successor'
+UPDATE_FINGER_TABLE = 'update_finger_table'
+PUT_DATA = 'put_data'
+UPDATE_KEYS = 'update_keys'
+FIND_DATA = 'find_data'
+GET_VALUE = 'get_value'
 
 class ModRange(object):
     """
@@ -122,6 +150,11 @@ class FingerEntry(object):
 
 
 class ChordNode():
+    """
+    An object that represents a node in a Chord P2P system 
+    that makes RPC to other nodes by the assistance of its finger 
+    table and stores keys some keys that exceed K/N
+    """
     def __init__(self, n):
         self.node = n
         self.finger = [None] + [FingerEntry(n, k) for k in range(1, M+1)]  # indexing starts at 1
@@ -132,19 +165,24 @@ class ChordNode():
         self.start_listening()
 
     def start_server(self, address):
+        """Creates a TCP/IP socket to listen and reply to incoming requests"""
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(address)
         listener.listen(BACKLOG)  
         return listener
 
     def start_listening(self):
+        """Starts a new listener thread"""
         print("Starting a listening thread at {}".format(self.address))
         listen_thr = threading.Thread(target=self.listen, args=())
         listen_thr.start()
 
-    def listen(self):		
+    def listen(self):	
+        """
+        Listener loop that handles each request in a separate thread
+        """	
         while True:
-            conn, addr = self.listener.accept()
+            conn, _ = self.listener.accept()
             handle_rpc_thr = threading.Thread(target = self.handle_rpc, args = (conn,))
             handle_rpc_thr.start()
 
@@ -160,10 +198,14 @@ class ChordNode():
         """ Ask this node to find id's successor = successor(predecessor(id))"""
         print(f"node {self.node}: finding successor of {id}...")
         np = self.find_predecessor(id)
-        return self.call_rpc(np, 'successor')
+        return self.call_rpc(np, SUCCESSOR)
     
     def call_rpc(self, n_prime, method, arg1= None, arg2= None):
-        print(f"{self.node}: Calling RPC to {n_prime}  with method = {method} and args {(arg1,arg2)}")
+        """
+        This method handles calling an RPC to another node by sending @n_prime
+        the required method to be executed on that node and the associated parameters
+        """
+        print(f"Self: Calling RPC to {n_prime}  with method = {method} and args {(arg1,arg2)}")
         address = ('localhost', TEST_BASE+n_prime)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             try:
@@ -173,79 +215,113 @@ class ChordNode():
             except Exception as e:
                 return None
 
-
     def join(self, n_prime = None):
+        """
+        A method called whenever a new node joins,
+        If it's the very first node, it will initialize all the finger table with 
+        itself as successor
+        Otherwise, It make RPCs to another existing node @n_prime to make it help
+        with the initialization
+        """
         if n_prime == None:
             for i in range(1, M+1):
                 self.finger[i].node = self.node
             self.predecessor = self.node
         else:
-            print(f"Initializing Finger Table with the help of {n_prime}\n\n")
+            print(f"Initializing Finger Table with the help of node {n_prime}\n\n")
             self.init_finger_table(n_prime)
             self.update_others()
 
         self.pr_finger_table()
 
     def pr_finger_table(self):
+        """Prints node's finger table"""
+        print("*"*30)
+        print(f"Node {self.node} finger table:\n")
+        print("start\tint.\t\tsucc.\n")
         for i in range(1, M+1):
-            print(f"index: {i} , start: {self.finger[i].start} , interval: {self.finger[i].start},{self.finger[i].next_start}, node: {self.finger[i].node}")
+            print(f"{i}: {self.finger[i].start} | [{self.finger[i].start}, {self.finger[i].next_start}) | {self.finger[i].node}")
+        print(f"\nPREDECESSOR:{self.predecessor}\nSUCCESSOR:{self.successor}")
+        print("*"*30)
+        print("\n")
 
     def init_finger_table(self, n_prime):
-        self.finger[1].node = self.call_rpc(n_prime, 'find_successor', self.finger[1].start)
-        print(f"my successor {self.successor}")
-        self.predecessor = self.call_rpc(self.successor, 'get_predecessor') # this should be successor.predecessor
-        print(f"my predecessor: {self.predecessor}")
-        self.call_rpc(self.successor, "set_predecessor", self.node)
+        """
+        A method to initialize finger table with the help of one other node @n_prime
+        by calling RPC to @n_prime to update each finger table entry
+        """
+        self.finger[1].node = self.call_rpc(n_prime, FIND_SUCCESSOR, self.finger[1].start)
+        self.predecessor = self.call_rpc(self.successor, GET_PREDECESSOR) # this should be successor.predecessor
+        self.call_rpc(self.successor, SET_PREDECESSOR, self.node)
         for i in range(1, M):
             if self.finger[i+1].start in ModRange(n, self.finger[i].node, NODES):
                 self.finger[i+1].node = self.finger[i].node
             else:
-                self.finger[i+1].node = self.call_rpc(n_prime, 'find_successor', self.finger[i+1].start)
+                self.finger[i+1].node = self.call_rpc(n_prime, FIND_SUCCESSOR, self.finger[i+1].start)
 
-    def put_data(self,key,value):
+    def put_data(self, key, value):
+        """
+        This method is called whenever a request comes to add a new key
+        It works by finding the valid node (successor of the key) which on 
+        its end adds the required @key,@value to their stored keys
+        """
         successor_node = self.find_successor(key)
-        print(f"DATA SHOULD BE PUT IN {successor_node}")
-        self.call_rpc(successor_node, 'update_keys', key, value)
+        self.call_rpc(successor_node, UPDATE_KEYS, key, value)
+        self.pr_keys()
 
+    def pr_keys(self):
+        """prints the keys stored on this node"""
+        print("*"*30)
+        print(f"Keys Stored on this node: {self.keys.keys()}\n")
+        
     def get_predecessor(self):
+        """returns node's predecessor"""
         return self.predecessor
 
     def set_predecessor(self, n):
+        """sets node's predecessor value"""
         self.predecessor = n
 
     def handle_rpc(self, client):
+        """
+        A method that handles receing an RPC from another node
+        by loading the data received which should include the required 
+        method and its arguments and returning back the result
+        """
         rpc = client.recv(BUF_SZ)
         method, arg1, arg2 = pickle.loads(rpc)
         result = self.dispatch_rpc(method, arg1, arg2)
         if result != None:
             client.sendall(pickle.dumps(result))
         client.close()
-        self.pr_finger_table()
-
+        
     def dispatch_rpc(self, method, arg1=None, arg2=None):
-        if method == 'find_successor':
+        """
+        A method that handles calling the actual local method coming from an
+        RPC with the given @method and arguments if applicable @arg1, arg2
+        """
+        if method == FIND_SUCCESSOR:
             return self.find_successor(arg1)
-        elif method == 'predecessor':
+        elif method == FIND_PREDECESSOR:
             return self.find_predecessor(arg1)
-        elif method == 'closest_preceding_finger':
+        elif method == CLOSEST_PRECEDING_FINGER:
             return self.closest_preceding_finger(arg1)
-        elif method == 'get_predecessor':
+        elif method == GET_PREDECESSOR:
             return self.predecessor
-        elif method == 'set_predecessor':
+        elif method == SET_PREDECESSOR:
             self.predecessor = arg1
             return "OK"
-        elif method == 'successor':
+        elif method == SUCCESSOR:
             return self.successor
-        elif method == 'update_finger_table':
-            self.update_finger_table(arg1, arg2)
-            return "OK"
-        elif method == 'put_data':
+        elif method == UPDATE_FINGER_TABLE:
+            return self.update_finger_table(arg1, arg2)
+        elif method == PUT_DATA:
             self.put_data(arg1, arg2)
-        elif method == 'update_keys':
+        elif method == UPDATE_KEYS:
             self.update_keys(arg1, arg2)
-        elif method == 'find_data':
+        elif method == FIND_DATA:
             return self.find_data(arg1, arg2)
-        elif method == 'get_value':
+        elif method == GET_VALUE:
             return self.get_value(arg1, arg2)
         else:
             print(f"Received invalid request {method} with args: {(arg1, arg2)}")
@@ -254,17 +330,20 @@ class ChordNode():
         if hashed_id>NODES:
             return NOT_FOUND_MSG
         successor_node = self.find_successor(hashed_id)
-        return self.call_rpc(successor_node, "get_value", hashed_id, key)
+        return self.call_rpc(successor_node, GET_VALUE, hashed_id, key)
 
     def get_value(self, hashed_id, key):
         if hashed_id not in self.keys:
+            print(f"self: key {key} doesn't exist")
             return NOT_FOUND_MSG
         
         entries_for_hash = self.keys[hashed_id]
 
         if key not in entries_for_hash:
+            print(f"self: key {key} doesn't exist")
             return NOT_FOUND_MSG
         
+        print(f"returning value for id {hashed_id} and key {key} .....")
         return entries_for_hash[key]
         
     def update_keys(self, key, value):
@@ -273,17 +352,16 @@ class ChordNode():
            entries = self.keys[key]      
         entries.update(value)
         self.keys[key] = entries  
+        self.pr_keys()
         
-        print(f"KEYS FOR THIS NODE : {self.keys}")
-
     def find_predecessor(self, id):
         """
         We are looking for n' such that id falls between n' and the successor for n'
         """
         n_prime = self.node
         # print(f"n_prime successor {n_prime_successor}")
-        while id not in ModRange(n_prime+1, self.call_rpc(n_prime, 'successor')+1, NODES):
-            n_prime = self.call_rpc(n_prime, 'closest_preceding_finger', id)
+        while id not in ModRange(n_prime+1, self.call_rpc(n_prime, SUCCESSOR)+1, NODES):
+            n_prime = self.call_rpc(n_prime, CLOSEST_PRECEDING_FINGER, id)
         return n_prime
 
     def closest_preceding_finger(self, id):
@@ -295,22 +373,19 @@ class ChordNode():
     def update_others(self):
         """ Update all other node that should have this node in their finger tables """
         for i in range(1, M+1):  # find last node p whose i-th finger might be this node
-            # FIXME: bug in paper, have to add the 1 +
             p = self.find_predecessor((1 + self.node - 2**(i-1) + NODES) % NODES)
-            self.call_rpc(p, 'update_finger_table', self.node, i)
+            self.call_rpc(p, UPDATE_FINGER_TABLE, self.node, i)
 
     def update_finger_table(self, s, i):
         """ if s is i-th finger of n, update this node's finger table with s """
-        # FIXME: don't want e.g. [1, 1) which is the whole circle
-        if (self.finger[i].start != self.finger[i].node
-                 # FIXME: bug in paper, [.start
+        if (self.finger[i].start != self.finger[i].node 
                  and s in ModRange(self.finger[i].start, self.finger[i].node, NODES)):
-            print('update_finger_table({},{}): {}[{}] = {} since {} in [{},{})'.format(
+            print('update_finger_table({},{}): {}[{}] = {} since {} in [{},{})\n'.format(
                      s, i, self.node, i, s, s, self.finger[i].start, self.finger[i].node))
             self.finger[i].node = s
-            print('#', self)
             p = self.predecessor  # get first node preceding myself
-            self.call_rpc(p, 'update_finger_table', s, i)
+            self.call_rpc(p, UPDATE_FINGER_TABLE, s, i)
+            self.pr_finger_table()
             return str(self)
         else:
             return 'did nothing {}'.format(self)
