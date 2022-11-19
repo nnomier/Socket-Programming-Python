@@ -2,7 +2,7 @@
 Chord Populate
 
 This class is run by running the command
-python3 chord_populate [NODE_ID] [FILE_NAME]
+python3 chord_populate.py [NODE_ID] [FILE_NAME]
 NODE_ID is ID of the node in Chord
 
 :Authors: Noha Nomier

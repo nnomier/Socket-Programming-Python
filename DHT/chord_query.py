@@ -1,3 +1,12 @@
+"""
+Chord Query
+
+This class is run by running the command
+python3 chord_populate.py [NODE_ID] [KEY]
+NODE_ID is ID of the node in Chord
+
+:Authors: Noha Nomier
+"""
 import pickle
 import hashlib
 import socket
